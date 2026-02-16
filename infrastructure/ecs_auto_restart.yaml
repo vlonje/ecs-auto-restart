@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Auto-Restart - Production Infrastructure (Lambda code from S3)'
+
+Parameters:
+  LambdaExecutionRoleArn:
+    Type: String
+    Description: ARN of existing IAM role for Lambda execution
+    AllowedPattern: 'arn:aws:iam::\d{12}:role/.+'
+    ConstraintDescription: Must be a valid IAM role ARN
+  
+  LambdaS3Bucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment package
+    
+  LambdaS3Key:
+    Type: String
+    Description: S3 key for Lambda deployment package
+    Default: ecs-auto-restart/lambda.zip
+    
+  ECSClusterName:
+    Type: String
+    Description: Name of the ECS Cluster
+    
+  ECSServiceNames:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of ECS service names to monitor
+  
+  DesiredTaskCount:
+    Type: Number
+    Description: Desired task count when restarting services
+    Default: 1
+    MinValue: 1
+    
+  MonitoringSchedule:
+    Type: String
+    Description: How often to check services
+    Default: 'rate(30 minutes)'
+    AllowedValues:
+      - 'rate(15 minutes)'
+      - 'rate(30 minutes)'
+      - 'rate(1 hour)'
+      - 'rate(2 hours)'
+      
+  AlertEmail:
+    Type: String
+    Description: Email address for restart notifications (leave empty to disable)
+    Default: ''
+    
+  Environment:
+    Type: String
+    Description: Environment name (prod, staging, dev)
+    Default: production
+    AllowedValues:
+      - production
+      - staging
+      - development
+
+Conditions:
+  EnableAlerts: !Not [!Equals [!Ref AlertEmail, '']]
+
+Resources:
+  # SNS Topic for Alerts
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: EnableAlerts
+    Properties:
+      TopicName: !Sub '${AWS::StackName}-alerts'
+      DisplayName: ECS Auto-Restart Alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+
+  # Lambda Function (References S3 - No code in CloudFormation)
+  ECSMonitorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-monitor'
+      Runtime: python3.11
+      Handler: main.lambda_handler
+      Role: !Ref LambdaExecutionRoleArn
+      Timeout: 300
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref LambdaS3Key
+      Environment:
+        Variables:
+          ECS_CLUSTER_NAME: !Ref ECSClusterName
+          ECS_SERVICE_NAMES: !Join [',', !Ref ECSServiceNames]
+          DESIRED_TASK_COUNT: !Ref DesiredTaskCount
+          SNS_TOPIC_ARN: !If [EnableAlerts, !Ref AlertTopic, '']
+          ENVIRONMENT: !Ref Environment
+
+  # EventBridge Rule
+  MonitoringRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${AWS::StackName}-schedule'
+      Description: !Sub 'Trigger ECS monitor for ${ECSClusterName}'
+      ScheduleExpression: !Ref MonitoringSchedule
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ECSMonitorFunction.Arn
+          Id: ECSMonitorTarget
+
+  # Lambda Permission for EventBridge
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ECSMonitorFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt MonitoringRule.Arn
+
+  # CloudWatch Log Group
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ECSMonitorFunction}'
+      RetentionInDays: 30
+
+  # CloudWatch Alarm for Lambda Errors
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: EnableAlerts
+    Properties:
+      AlarmName: !Sub '${AWS::StackName}-lambda-errors'
+      AlarmDescription: Alert when Lambda function encounters errors
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ECSMonitorFunction
+      AlarmActions:
+        - !Ref AlertTopic
+
+Outputs:
+  LambdaFunctionArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt ECSMonitorFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-lambda-arn'
+  
+  ScheduleRuleArn:
+    Description: ARN of the EventBridge schedule rule
+    Value: !GetAtt MonitoringRule.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-rule-arn'
+  
+  SNSTopicArn:
+    Description: ARN of the SNS alert topic
+    Condition: EnableAlerts
+    Value: !Ref AlertTopic
+    Export:
+      Name: !Sub '${AWS::StackName}-sns-arn'
+  
+  MonitoredServices:
+    Description: Services being monitored
+    Value: !Join [', ', !Ref ECSServiceNames]
+  
+  MonitoringFrequency:
+    Description: How often services are checked
+    Value: !Ref MonitoringSchedule
+  
+  UsingIAMRole:
+    Description: IAM Role being used by Lambda
+    Value: !Ref LambdaExecutionRoleArn
+    
+  LambdaCodeLocation:
+    Description: S3 location of Lambda code
+    Value: !Sub 's3://${LambdaS3Bucket}/${LambdaS3Key}'
+    
+  UpdateCodeCommand:
+    Description: Command to update Lambda code
+    Value: !Sub 'cd function && zip lambda.zip main.py && aws s3 cp lambda.zip s3://${LambdaS3Bucket}/${LambdaS3Key} && aws lambda update-function-code --function-name ${ECSMonitorFunction} --s3-bucket ${LambdaS3Bucket} --s3-key ${LambdaS3Key}'
