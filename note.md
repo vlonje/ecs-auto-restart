@@ -5,17 +5,17 @@
 arn:aws:iam::194722442412:role/ECSMetabaseRestartPolicy
 
 # Lambda Function Name
-agadpay-metabase-ecs-autorestart-prod-monitor
+vin-metabase-ecs-autorestart-prod-monitor
 
 # Cloudformation Stack Name
-agadpay-metabase-ecs-autorestart-prod
+vin-metabase-ecs-autorestart-prod
 
 # Cluster
-agadpay-prod
+vin-prod
 
 # service
-agadpay-metabase-prod
+vin-metabase-prod
 
 # S3 Bucket:         
-agadpay-metabase-ecs-autorestart-prod
+vin-metabase-ecs-autorestart-prod
 ```

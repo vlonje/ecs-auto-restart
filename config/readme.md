@@ -40,7 +40,7 @@ Each `.env` file contains:
 | `S3_BUCKET` | S3 bucket for Lambda code | `my-lambda-bucket` |
 | `S3_KEY` | S3 key for Lambda zip | `ecs-auto-restart/lambda.zip` |
 | `LAMBDA_ROLE_ARN` | IAM role ARN for Lambda | `arn:aws:iam::123:role/name` |
-| `ECS_CLUSTER_NAME` | ECS cluster to monitor | `agadpay-prod` |
+| `ECS_CLUSTER_NAME` | ECS cluster to monitor | `vin-prod` |
 | `ECS_SERVICE_NAMES` | Services to monitor (comma-separated) | `service1,service2` |
 | `DESIRED_TASK_COUNT` | Task count when restarting | `1` |
 | `MONITORING_SCHEDULE` | Check frequency | `rate(30 minutes)` |
