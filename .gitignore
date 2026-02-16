@@ -23,6 +23,11 @@ function.zip
 .env.*.local
 config/*.local.env
 config/*-credentials.env
+*.env
+.env.*
+production.env
+sandbox.env
+staging.env
 
 # AWS
 *.pem
